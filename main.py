@@ -111,3 +111,16 @@ def call_algorithms ():
                 match (us:User{community:com}) 
                 merge (us)-[:getPromotion]-(t:Type{typeName:new_type})
          """)
+
+
+def retrieve_for_recommendation (email):
+    with driver.session() as session:
+        resultList = []
+        result = session.run("""        
+            match (u:User)-[getPromotion]-(t:Type) where u.email = {email}  return t.typeName as type order by u.userName
+        """,  email = email)
+        for record in result:
+            resultList.append(record["type"])
+        return resultList
+
+retrieve_for_recommendation ("froy@gmail.com")
