@@ -31,7 +31,8 @@ driver = GraphDatabase.driver(
 def insertNeo4j (userName, email, productName, type, location, purchaseDate, quantity, price, currency, merchant):
     with driver.session() as session:
         session.run("""
-        Merge (u:User{userName:{userName}, email: {email}}) Merge (p:Product{productName : {productName}, type: {type}})  
+        Merge (u:User{userName:{userName}, email: {email}}) Merge (p:Product{productName : {productName}})  
+        Merge (p)-[:typeOf]-(t:Type{typeName:{type}})
         Merge (u)-[:bought {location: {location}, purchaseDate: {purchaseDate}, quantity: {quantity}, 
         price: {price}, currency: {currency}, merchant: {merchant}}]->(p)
         """, userName = userName, email = email, productName = productName,
@@ -80,3 +81,33 @@ for transaction in transactions:
         quantity = str(product['quantity']) #quantity
         insertNeo4j(userName, email, productName, type, location, purchaseDate, quantity, price, currency, merchant)
 
+
+call_algorithms()
+
+def call_algorithms ():
+    with driver.session() as session:
+        session.run("""        
+            MATCH (u:User)-[ur:bought]->(p:Product)--(t:Type)
+            WITH {item:id(u), categories: collect(id(t))} as userData
+            WITH collect(userData) as data
+            CALL algo.similarity.jaccard.stream(data, {topK: 3, similarityCutoff: 0.7})
+            YIELD item1, item2, count1, count2, intersection, similarity
+            With algo.asNode(item1) AS from, algo.asNode(item2) AS to, similarity
+            merge (from)-[r:similarTo]-> (to)
+        """)
+        session.run("""        
+                CALL algo.louvain.stream('User', 'similar', {})
+                YIELD nodeId, community
+                with algo.asNode(nodeId) AS user, community, nodeId
+                SET user.community = community
+         """)
+        session.run("""  
+                match (u:User)-[r:bought]-(p:Product)--(t:Type) 
+                with   u.community as com, t.typeName as type, count(id(p)) as prod
+                order by com, prod desc 
+                with com, collect(type) as type_collect 
+                with com, type_collect[..3] as max_type
+                unwind max_type as new_type
+                match (us:User{community:com}) 
+                merge (us)-[:getPromotion]-(t:Type{typeName:new_type})
+         """)
