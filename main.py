@@ -154,7 +154,5 @@ def update_property_graph_transaction():
                 counter = counter + 1
 
 if __name__ == "__main__":
-        # update_property_graph_transaction();
-
-        # build_recommendation()
-        print(get_recommended_product ("madeline14@hotmail.com"))
+        update_property_graph_transaction();
+        build_recommendation()
