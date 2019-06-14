@@ -4,87 +4,65 @@ from dotenv import load_dotenv
 from models.user_model import User
 from models.promotion_model import Promotion
 from models.transaction_model import Transaction
-
-load_dotenv()
-
-connect(host=os.getenv('MONGODB_URI'))
-
-promotions = Promotion.objects.all()
-transactions = Transaction.objects.all()
-users = User.objects.all()
-
-# TODO: import all MongoDB documents to Neo4J
-
-
 import os
 from neo4j import GraphDatabase
+from SPARQLWrapper import SPARQLWrapper, JSON
+import urllib.request
+import urllib.parse
 
+load_dotenv()
+connect(host=os.getenv('MONGODB_URI'))
 
-uri = "bolt://localhost:7687"
-user = "neo4j"
-password = "pinar123"
+neo4j_uri = os.getenv('NEO4J_URI')
+neo4j_user = os.getenv('NEO4J_USER')
+neo4j_password = os.getenv('NEO4J_PASSWORD')
 
 driver = GraphDatabase.driver(
-            uri, auth=(user, password))
+            neo4j_uri, auth=(neo4j_user, neo4j_password))
 
 
-def insertNeo4j (userName, email, productName, type, location, purchaseDate, quantity, price, currency, merchant):
+def insert_user_and_product(userName, email, productName):
+    with driver.session() as session:
+        session.run(
+            """ Merge (u:User{userName:{userName}, email: {email}}) Merge (p:Product{productName : {productName}})""",
+            userName=userName, email=email, productName=productName
+        )
+
+def create_index():
     with driver.session() as session:
         session.run("""
-        Merge (u:User{userName:{userName}, email: {email}}) Merge (p:Product{productName : {productName}})  
-        Merge (p)-[:typeOf]-(t:Type{typeName:{type}})
-        Merge (u)-[:bought {location: {location}, purchaseDate: {purchaseDate}, quantity: {quantity}, 
+        create index on :User(email)
+        """)
+
+def insert_transactions (userName, email, productName, type, location, purchaseDate, quantity, price, currency, merchant):
+    with driver.session() as session:
+        session.run("""
+        Merge (p:Product{productName : {productName}})-[:typeOf]->(t:Type{typeName:{type}})
+        Merge (u:User{userName:{userName}})-[:bought{location: {location}, purchaseDate: {purchaseDate}, quantity: {quantity}, 
         price: {price}, currency: {currency}, merchant: {merchant}}]->(p)
         """, userName = userName, email = email, productName = productName,
                type = type, location = location, purchaseDate = purchaseDate, quantity = quantity,
                price = price, currency = currency, merchant = merchant)
 
-from SPARQLWrapper import SPARQLWrapper, JSON
-sparql = SPARQLWrapper("http://10.6.0.119:8890/sparql")
-sparql.setReturnFormat(JSON)
-sparql.addDefaultGraph('http://localhost:8890/reach-it')
-
-
-
-def kg_retrieve(value):
+def get_product_category(product_name):
     sparql.setQuery ( f"""
     PREFIX reachIT: <http://www.reach-it.com/ontology/>
     SELECT str(?c) as ?type
-    WHERE {{
-    ?product reachIT:productName ?productName.
-    ?product reachIT:belongsToCategory ?t.
-    ?t reachIT:categoryName ?c .
-    FILTER (lang(?c)='en' and lang(?productName)='en' and ?productName={value})
-    }}
-    order by  desc(?type)
-    limit 1
+        WHERE {{
+                ?product reachIT:productName ?productName.
+                ?product reachIT:belongsToCategory ?t.
+                ?t reachIT:categoryName ?c .
+                FILTER (lang(?c)='en' and lang(?productName)='en' and ?productName={product_name})
+        }}
+    ORDER BY  DESC(?type)
+    LIMIT 1
     """)
 
     query_results = sparql.query().convert()
 
     return query_results["results"]["bindings"][0]["type"]["value"]
 
-
-for transaction in transactions:
-    print("whatever")
-    # print(transaction['user']['name'])
-    userName = transaction['user']['name'] #username
-    email = transaction['user']['email'] #useremail
-    merchant = transaction['merchant'] #merchant
-    purchaseDate = str(transaction['created_at']) #purchaseDate
-    location = transaction['location'] #location
-    for product in transactions[0]['items']:
-        productName = product['name']  #productName
-        type = kg_retrieve(f"'{productName}'@en")
-        price = str(product['price'])  #price
-        currency = product['currency']  #currency
-        quantity = str(product['quantity']) #quantity
-        insertNeo4j(userName, email, productName, type, location, purchaseDate, quantity, price, currency, merchant)
-
-
-call_algorithms()
-
-def call_algorithms ():
+def build_recommendation():
     with driver.session() as session:
         session.run("""        
             MATCH (u:User)-[ur:bought]->(p:Product)--(t:Type)
@@ -112,15 +90,71 @@ def call_algorithms ():
                 merge (us)-[:getPromotion]-(t:Type{typeName:new_type})
          """)
 
+def update_property_graph_transaction():
+        promotions = Promotion.objects.all()
+        transactions = Transaction.objects.all()
+        users = User.objects.all()
 
-def retrieve_for_recommendation (email):
-    with driver.session() as session:
-        resultList = []
-        result = session.run("""        
-            match (u:User)-[getPromotion]-(t:Type) where u.email = {email}  return t.typeName as type order by u.userName
-        """,  email = email)
-        for record in result:
-            resultList.append(record["type"])
-        return resultList
+        total_transaction = len(transactions)
+        print("Total transaction: "+str(total_transaction))
+        counter = 1
+        for transaction in transactions[93:100]:
+                print("Transaction "+str(counter)+" of "+str(total_transaction))
+                # print(transaction['user']['name'])
+                userName = transaction['user']['name'] #username
+                email = transaction['user']['email'] #useremail
+                merchant = transaction['merchant'] #merchant
+                purchaseDate = str(transaction['created_at']) #purchaseDate
+                location = transaction['location'] #location
+                for product in transaction['items']:
+      
+                        product_name = product['name']
+                        price = str(product['price'])  #price
+                        currency = product['currency']  #currency
+                        quantity = str(product['quantity']) #quantity
+                        
+                        # Retrieve the product type from Knowledge Graph
+                        try:
+                                url_encoded_product_name = os.getenv("KG_SERVICE_URI")+"productcategory/?product_name="+urllib.parse.quote(product_name) 
+                                product_type = urllib.request.urlopen(url_encoded_product_name).read()
+                        except expression as identifier:
+                                product_type=""
+                        # If the product type is not empty, insert it to neo4j
+                        if(len(product_type)>0):
+                                insert_user_and_product(userName, email, product_name)
+                counter = counter + 1
+        
+        create_index()
 
-retrieve_for_recommendation ("froy@gmail.com")
+        counter = 1
+        for transaction in transactions[0:100]:
+                print("Transaction "+str(counter)+" of "+str(total_transaction))
+                # print(transaction['user']['name'])
+                userName = transaction['user']['name'] #username
+                email = transaction['user']['email'] #useremail
+                merchant = transaction['merchant'] #merchant
+                purchaseDate = str(transaction['created_at']) #purchaseDate
+                location = transaction['location'] #location
+                for product in transaction['items']:
+      
+                        product_name = product['name']
+                        price = str(product['price'])  #price
+                        currency = product['currency']  #currency
+                        quantity = str(product['quantity']) #quantity
+                        
+                        # Retrieve the product type from Knowledge Graph
+                        try:
+                                url_encoded_product_name = os.getenv("KG_SERVICE_URI")+"productcategory/?product_name="+urllib.parse.quote(product_name) 
+                                product_type = urllib.request.urlopen(url_encoded_product_name).read()
+                        except expression as identifier:
+                                product_type=""
+                        # If the product type is not empty, insert it to neo4j
+                        if(len(product_type)>0):
+                                insert_transactions(userName, email, product_name, product_type, location, purchaseDate, quantity, price, currency, merchant)
+                counter = counter + 1
+
+if __name__ == "__main__":
+        # update_property_graph_transaction();
+
+        # build_recommendation()
+        print(get_recommended_product ("madeline14@hotmail.com"))
