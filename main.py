@@ -10,15 +10,6 @@ from SPARQLWrapper import SPARQLWrapper, JSON
 import urllib.request
 import urllib.parse
 
-load_dotenv()
-connect(host=os.getenv('MONGODB_URI'))
-
-neo4j_uri = os.getenv('NEO4J_URI')
-neo4j_user = os.getenv('NEO4J_USER')
-neo4j_password = os.getenv('NEO4J_PASSWORD')
-
-driver = GraphDatabase.driver(
-            neo4j_uri, auth=(neo4j_user, neo4j_password))
 
 
 def insert_user_and_product(userName, email, productName):
@@ -98,7 +89,7 @@ def update_property_graph_transaction():
         total_transaction = len(transactions)
         print("Total transaction: "+str(total_transaction))
         counter = 1
-        for transaction in transactions[93:100]:
+        for transaction in transactions:
                 print("Transaction "+str(counter)+" of "+str(total_transaction))
                 # print(transaction['user']['name'])
                 userName = transaction['user']['name'] #username
@@ -117,7 +108,7 @@ def update_property_graph_transaction():
                         try:
                                 url_encoded_product_name = os.getenv("KG_SERVICE_URI")+"productcategory/?product_name="+urllib.parse.quote(product_name) 
                                 product_type = urllib.request.urlopen(url_encoded_product_name).read()
-                        except expression as identifier:
+                        except:
                                 product_type=""
                         # If the product type is not empty, insert it to neo4j
                         if(len(product_type)>0):
@@ -127,7 +118,7 @@ def update_property_graph_transaction():
         create_index()
 
         counter = 1
-        for transaction in transactions[0:100]:
+        for transaction in transactions:
                 print("Transaction "+str(counter)+" of "+str(total_transaction))
                 # print(transaction['user']['name'])
                 userName = transaction['user']['name'] #username
@@ -146,7 +137,7 @@ def update_property_graph_transaction():
                         try:
                                 url_encoded_product_name = os.getenv("KG_SERVICE_URI")+"productcategory/?product_name="+urllib.parse.quote(product_name) 
                                 product_type = urllib.request.urlopen(url_encoded_product_name).read()
-                        except expression as identifier:
+                        except:
                                 product_type=""
                         # If the product type is not empty, insert it to neo4j
                         if(len(product_type)>0):
@@ -154,5 +145,15 @@ def update_property_graph_transaction():
                 counter = counter + 1
 
 if __name__ == "__main__":
-        update_property_graph_transaction();
-        build_recommendation()
+    load_dotenv()
+    connect(host=os.getenv('MONGODB_URI'))
+
+    neo4j_uri = os.getenv('NEO4J_URI')
+    neo4j_user = os.getenv('NEO4J_USER')
+    neo4j_password = os.getenv('NEO4J_PASSWORD')
+
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+
+    update_property_graph_transaction()
+    build_recommendation()
+	
